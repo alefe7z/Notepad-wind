@@ -30,11 +30,12 @@ O executável fica em `dist\BlocoDeNotas.exe`.
   Localizar / Localizar próxima (F3) / anterior (Shift+F3), Substituir, Ir para,
   Selecionar Tudo, Hora/Data (F5)
 - **Formatar**: Quebra Automática de Linha, Fonte (família, estilo, tamanho)
-- **Exibir**: Zoom (Ctrl+Mais / Ctrl+Menos / Ctrl+0 / Ctrl+roda do mouse), Barra de Status
+- **Exibir**: Zoom (Ctrl+Mais / Ctrl+Menos / Ctrl+0 / Ctrl+roda do mouse), Barra de Status,
+  Tema (Claro, Escuro ou Padrão do sistema — acompanha o modo escuro do Windows)
 - **Ajuda**: Exibir Ajuda, Enviar Comentários, Sobre
 - Barra de status com linha/coluna, zoom, fim de linha (CRLF/LF/CR) e codificação
   (UTF-8, UTF-8 com BOM, UTF-16, ANSI) detectados automaticamente e preservados ao salvar
 - Título com `*` quando há alterações e aviso para salvar antes de fechar
 - Menu de contexto (botão direito)
-- Preferências (fonte, quebra de linha, barra de status, tamanho da janela) salvas em
+- Preferências (fonte, quebra de linha, barra de status, tema, tamanho da janela) salvas em
   `%APPDATA%\BlocoDeNotasPy\settings.json`

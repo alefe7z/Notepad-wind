@@ -37,6 +37,98 @@ ENCODING_NAMES = {
 STATUS_BG = "#F0F0F0"
 STATUS_LINE = "#D7D7D7"
 
+# No Windows a barra de menus nativa não aceita cores; no tema escuro ela é
+# substituída por uma barra desenhada pelo próprio programa.
+CUSTOM_MENUBAR_IN_DARK = IS_WINDOWS
+
+THEMES = {
+    "light": {
+        "ui": "#F0F0F0", "editor": "#FFFFFF", "fg": "#000000", "status": STATUS_BG,
+        "line": STATUS_LINE, "inactive_sel": "#CCE8FF", "menubar": "#FFFFFF",
+        "hover": "#E5F3FF", "field": "#FFFFFF", "disabled": "#6D6D6D",
+    },
+    "dark": {
+        "ui": "#2B2B2B", "editor": "#1E1E1E", "fg": "#E8E8E8", "status": "#2B2B2B",
+        "line": "#3F3F3F", "inactive_sel": "#264F78", "menubar": "#2B2B2B",
+        "hover": "#3E3E3E", "pressed": "#505050", "field": "#1E1E1E", "disabled": "#7A7A7A",
+        "border": "#4A4A4A", "button": "#363636", "trough": "#2B2B2B",
+        "thumb": "#5C5C5C", "thumb_active": "#7A7A7A", "sel": "#0078D7",
+    },
+}
+MENU_COLOR_OPTS = ("background", "foreground", "activebackground", "activeforeground",
+                   "disabledforeground", "selectcolor")
+
+
+def system_prefers_dark():
+    """Lê a preferência de tema de aplicativos do Windows (Configurações > Cores)."""
+    if not IS_WINDOWS:
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            value, _ = winreg.QueryValueEx(k, "AppsUseLightTheme")
+        return value == 0
+    except Exception:
+        return False
+
+
+def set_dark_titlebar(win, dark):
+    """Deixa a barra de título da janela escura (Windows 10 1809+ / Windows 11)."""
+    if not IS_WINDOWS:
+        return
+    try:
+        import ctypes
+        win.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id()) or win.winfo_id()
+        value = ctypes.c_int(1 if dark else 0)
+        for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (novo e antigo)
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                    hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+                break
+        # Força o redesenho da moldura: SWP_NOSIZE|NOMOVE|NOZORDER|NOACTIVATE|FRAMECHANGED
+        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
+    except Exception:
+        pass
+
+
+def configure_dark_ttk(style, p):
+    style.theme_use("clam")
+    style.configure(".", background=p["ui"], foreground=p["fg"], fieldbackground=p["field"],
+                    bordercolor=p["border"], lightcolor=p["ui"], darkcolor=p["ui"],
+                    troughcolor=p["trough"], selectbackground=p["sel"],
+                    selectforeground="#FFFFFF", insertcolor=p["fg"], arrowcolor=p["fg"],
+                    focuscolor=p["border"])
+    style.map(".", foreground=[("disabled", p["disabled"])],
+              background=[("disabled", p["ui"])])
+    style.configure("TButton", background=p["button"], lightcolor=p["button"],
+                    darkcolor=p["button"], bordercolor=p["border"], padding=(10, 3))
+    style.map("TButton", background=[("pressed", p["pressed"]), ("active", p["hover"])],
+              lightcolor=[("active", p["hover"])], darkcolor=[("active", p["hover"])])
+    style.configure("TEntry", fieldbackground=p["field"], foreground=p["fg"],
+                    lightcolor=p["field"], darkcolor=p["field"])
+    style.configure("TCombobox", fieldbackground=p["field"], background=p["button"],
+                    foreground=p["fg"])
+    style.map("TCombobox", fieldbackground=[("readonly", p["field"])],
+              foreground=[("readonly", p["fg"])], selectbackground=[("readonly", p["field"])],
+              selectforeground=[("readonly", p["fg"])], background=[("active", p["hover"])])
+    for cls in ("TCheckbutton", "TRadiobutton"):
+        style.configure(cls, background=p["ui"], foreground=p["fg"],
+                        indicatorbackground=p["field"], indicatorforeground=p["fg"],
+                        upperbordercolor=p["border"], lowerbordercolor=p["border"])
+        style.map(cls, background=[("active", p["ui"])],
+                  indicatorbackground=[("pressed", p["hover"]), ("active", p["field"])])
+    style.configure("TLabelframe", background=p["ui"], bordercolor=p["border"],
+                    lightcolor=p["ui"], darkcolor=p["ui"])
+    style.configure("TLabelframe.Label", background=p["ui"], foreground=p["fg"])
+    style.configure("TScrollbar", background=p["thumb"], troughcolor=p["trough"],
+                    bordercolor=p["trough"], lightcolor=p["thumb"], darkcolor=p["thumb"],
+                    arrowcolor=p["fg"], gripcount=0)
+    style.map("TScrollbar", background=[("pressed", p["thumb_active"]),
+                                        ("active", p["thumb_active"])])
+    style.configure("TSizegrip", background=p["status"])
+    style.configure("TSeparator", background=p["line"])
+
 
 def settings_path():
     base = os.environ.get("APPDATA") or os.path.join(os.path.expanduser("~"), ".config")
@@ -54,6 +146,7 @@ def load_settings():
         "geometry": "420x520",
         "match_case": False,
         "wrap_around": False,
+        "theme": "system",  # "light", "dark" ou "system"
     }
     try:
         with open(settings_path(), "r", encoding="utf-8") as f:
@@ -124,6 +217,7 @@ class BaseDialog(tk.Toplevel):
                 pass
 
     def place_near_parent(self):
+        self.app.style_dialog(self)
         self.update_idletasks()
         root = self.app.root
         x = root.winfo_rootx() + max(0, (root.winfo_width() - self.winfo_width()) // 2)
@@ -422,8 +516,14 @@ class Notepad:
         self.text_font = tkfont.Font(root)
         self.wrap_var = tk.BooleanVar(value=self.settings["word_wrap"])
         self.status_var = tk.BooleanVar(value=self.settings["status_bar"])
+        self.theme_var = tk.StringVar(value=self.settings.get("theme", "system"))
+        self.dark = False
+        self.palette = THEMES["light"]
+        self.style = ttk.Style(root)
+        self.light_ttk_theme = self.style.theme_use()
 
         self.build_menu()
+        self.build_custom_menubar()
         self.build_statusbar()
         self.build_editor()
         self.build_context_menu()
@@ -431,6 +531,8 @@ class Notepad:
         self.apply_font()
         self.apply_wrap()
         self.apply_statusbar()
+        self.apply_theme()
+        root.after(2000, self.poll_system_theme)
 
         root.protocol("WM_DELETE_WINDOW", self.exit_app)
         if path:
@@ -442,6 +544,7 @@ class Notepad:
     # ---------------------------------------------------------------- layout
     def build_menu(self):
         m = tk.Menu(self.root)
+        self.menubar = m
         self.root.config(menu=m)
 
         f = tk.Menu(m)
@@ -455,7 +558,7 @@ class Notepad:
         f.add_command(label="Imprimir...", accelerator="Ctrl+P", command=self.print_file)
         f.add_separator()
         f.add_command(label="Sair", command=self.exit_app)
-        m.add_cascade(label="Arquivo", menu=f)
+        m.add_cascade(label="Arquivo", menu=f, underline=0)
 
         e = tk.Menu(m, postcommand=self.refresh_edit_menu)
         self.edit_menu = e
@@ -475,13 +578,13 @@ class Notepad:
         e.add_separator()
         e.add_command(label="Selecionar Tudo", accelerator="Ctrl+A", command=self.select_all)
         e.add_command(label="Hora/Data", accelerator="F5", command=self.insert_datetime)
-        m.add_cascade(label="Editar", menu=e)
+        m.add_cascade(label="Editar", menu=e, underline=0)
 
         fm = tk.Menu(m)
         fm.add_checkbutton(label="Quebra Automática de Linha", variable=self.wrap_var,
                            command=self.apply_wrap)
         fm.add_command(label="Fonte...", command=lambda: FontDialog(self))
-        m.add_cascade(label="Formatar", menu=fm)
+        m.add_cascade(label="Formatar", menu=fm, underline=0)
 
         v = tk.Menu(m)
         z = tk.Menu(v)
@@ -491,15 +594,27 @@ class Notepad:
         v.add_cascade(label="Zoom", menu=z)
         v.add_checkbutton(label="Barra de Status", variable=self.status_var,
                           command=self.apply_statusbar)
+        t = tk.Menu(v)
+        t.add_radiobutton(label="Claro", value="light", variable=self.theme_var,
+                          command=self.apply_theme)
+        t.add_radiobutton(label="Escuro", value="dark", variable=self.theme_var,
+                          command=self.apply_theme)
+        t.add_radiobutton(label="Padrão do sistema", value="system", variable=self.theme_var,
+                          command=self.apply_theme)
+        v.add_cascade(label="Tema", menu=t)
         self.view_menu = v
-        m.add_cascade(label="Exibir", menu=v)
+        m.add_cascade(label="Exibir", menu=v, underline=1)
 
         h = tk.Menu(m)
         h.add_command(label="Exibir Ajuda", command=self.show_help)
         h.add_command(label="Enviar Comentários", command=self.send_feedback)
         h.add_separator()
         h.add_command(label="Sobre o Bloco de Notas", command=lambda: AboutDialog(self))
-        m.add_cascade(label="Ajuda", menu=h)
+        m.add_cascade(label="Ajuda", menu=h, underline=1)
+
+        self.cascades = [("Arquivo", f, 0), ("Editar", e, 0), ("Formatar", fm, 0),
+                         ("Exibir", v, 1), ("Ajuda", h, 1)]
+        self.all_menus = [m, f, e, fm, v, z, t, h]
 
     def build_editor(self):
         self.editor_frame = tk.Frame(self.root, bd=0)
@@ -512,8 +627,8 @@ class Notepad:
             selectbackground="#0078D7", selectforeground="#FFFFFF",
             inactiveselectbackground="#CCE8FF", exportselection=True,
         )
-        self.vbar = tk.Scrollbar(self.editor_frame, orient="vertical", command=self.text.yview)
-        self.hbar = tk.Scrollbar(self.editor_frame, orient="horizontal", command=self.text.xview)
+        self.vbar = ttk.Scrollbar(self.editor_frame, orient="vertical", command=self.text.yview)
+        self.hbar = ttk.Scrollbar(self.editor_frame, orient="horizontal", command=self.text.xview)
         self.corner = tk.Frame(self.editor_frame, bg=STATUS_BG, width=17, height=17)
         self.text.configure(yscrollcommand=self.vbar.set, xscrollcommand=self.hbar.set)
         self.text.grid(row=0, column=0, sticky="nsew")
@@ -524,15 +639,21 @@ class Notepad:
         self.editor_frame.columnconfigure(0, weight=1)
 
         self.text.bind("<<Modified>>", self.on_modified)
+        # Tk 8.6 não tem "inactiveselectforeground": troca a cor ao perder o foco
+        self.text.bind("<FocusIn>", lambda e: self.text.configure(selectforeground="#FFFFFF"))
+        self.text.bind("<FocusOut>", lambda e: self.text.configure(
+            selectforeground=self.palette["fg"]))
         for ev in ("<KeyRelease>", "<ButtonRelease-1>", "<B1-Motion>", "<<Selection>>"):
             self.text.bind(ev, lambda e: self.update_status(), add="+")
 
     def build_statusbar(self):
         sb = tk.Frame(self.root, bg=STATUS_BG, height=23)
         self.statusbar = sb
-        tk.Frame(sb, bg=STATUS_LINE, height=1).pack(side="top", fill="x")
+        top_line = tk.Frame(sb, bg=STATUS_LINE, height=1)
+        top_line.pack(side="top", fill="x")
         row = tk.Frame(sb, bg=STATUS_BG)
         row.pack(fill="both", expand=True)
+        self.sb_bg, self.sb_lines, self.sb_labels = [sb, row], [top_line], []
 
         grip = ttk.Sizegrip(row)
         grip.pack(side="right", anchor="se")
@@ -542,9 +663,14 @@ class Notepad:
             frame = tk.Frame(row, bg=STATUS_BG, width=width, height=22)
             frame.pack_propagate(False)
             frame.pack(side="right", fill="y")
-            tk.Frame(frame, bg=STATUS_LINE, width=1).pack(side="left", fill="y")
-            tk.Label(frame, textvariable=var, bg=STATUS_BG, anchor="w", padx=6,
-                     font=UI_FONT).pack(side="left", fill="both", expand=True)
+            sep = tk.Frame(frame, bg=STATUS_LINE, width=1)
+            sep.pack(side="left", fill="y")
+            lbl = tk.Label(frame, textvariable=var, bg=STATUS_BG, anchor="w", padx=6,
+                           font=UI_FONT)
+            lbl.pack(side="left", fill="both", expand=True)
+            self.sb_bg.append(frame)
+            self.sb_lines.append(sep)
+            self.sb_labels.append(lbl)
             return var
 
         self.enc_var = cell(120, "UTF-8")
@@ -565,6 +691,7 @@ class Notepad:
         c.add_separator()
         c.add_command(label="Pesquisar com o Bing...", command=self.search_web)
         self.context_menu = c
+        self.all_menus.append(c)
 
         def show(e):
             self.refresh_menu_state(c, {"Desfazer": 0, "Recortar": 2, "Copiar": 3,
@@ -635,6 +762,122 @@ class Notepad:
             self.statusbar.pack(side="bottom", fill="x", before=self.editor_frame)
         else:
             self.statusbar.pack_forget()
+
+    # ---------------------------------------------------------------- tema
+    def build_custom_menubar(self):
+        """Barra de menus desenhada (usada no tema escuro no Windows)."""
+        self.custom_bar = tk.Frame(self.root, bd=0)
+        self.custom_labels = []
+        self.alt_keys = {}
+        for label, menu, ul in self.cascades:
+            lbl = tk.Label(self.custom_bar, text=label, underline=ul, padx=7, pady=3, font=UI_FONT)
+            lbl.pack(side="left")
+            lbl.bind("<Enter>", lambda e, l=lbl: l.configure(bg=self.palette["hover"]))
+            lbl.bind("<Leave>", lambda e, l=lbl: l.configure(bg=self.palette["menubar"]))
+            lbl.bind("<Button-1>", lambda e, l=lbl, m=menu: self.post_custom_menu(l, m))
+            self.custom_labels.append(lbl)
+            self.alt_keys[label[ul].lower()] = (lbl, menu)
+        self.root.bind("<Alt-KeyPress>", self.on_alt_key)
+
+    def post_custom_menu(self, label, menu):
+        label.configure(bg=self.palette["hover"])
+        try:
+            menu.tk_popup(label.winfo_rootx(), label.winfo_rooty() + label.winfo_height())
+        finally:
+            menu.grab_release()
+            label.configure(bg=self.palette["menubar"])
+        return "break"
+
+    def on_alt_key(self, event):
+        if not self.custom_bar.winfo_ismapped():
+            return None  # barra nativa trata o Alt sozinha
+        item = self.alt_keys.get((event.keysym or "").lower())
+        if item:
+            self.post_custom_menu(*item)
+            return "break"
+        return None
+
+    def poll_system_theme(self):
+        if self.theme_var.get() == "system" and system_prefers_dark() != self.dark:
+            self.apply_theme()
+        self.root.after(2000, self.poll_system_theme)
+
+    def apply_theme(self):
+        choice = self.theme_var.get()
+        self.settings["theme"] = choice
+        dark = system_prefers_dark() if choice == "system" else choice == "dark"
+        self.dark = dark
+        p = self.palette = THEMES["dark" if dark else "light"]
+
+        if dark:
+            configure_dark_ttk(self.style, p)
+        else:
+            self.style.theme_use(self.light_ttk_theme)
+
+        # Editor e barra de status
+        self.text.configure(bg=p["editor"], fg=p["fg"], insertbackground=p["fg"],
+                            inactiveselectbackground=p["inactive_sel"])
+        self.editor_frame.configure(bg=p["editor"])
+        self.corner.configure(bg=p["ui"])
+        for w in self.sb_bg:
+            w.configure(bg=p["status"])
+        for w in self.sb_lines:
+            w.configure(bg=p["line"])
+        for w in self.sb_labels:
+            w.configure(bg=p["status"], fg=p["fg"])
+
+        # Menus (guarda as cores originais na primeira vez)
+        if not hasattr(self, "menu_defaults"):
+            self.menu_defaults = {m: {o: m.cget(o) for o in MENU_COLOR_OPTS}
+                                  for m in self.all_menus}
+        for m in self.all_menus:
+            if dark:
+                m.configure(background=p["menubar"], foreground=p["fg"],
+                            activebackground=p["hover"], activeforeground=p["fg"],
+                            disabledforeground=p["disabled"], selectcolor=p["fg"])
+            else:
+                m.configure(**self.menu_defaults[m])
+
+        # Lista suspensa das caixas de combinação
+        self.root.option_add("*TCombobox*Listbox.background", p["field"])
+        self.root.option_add("*TCombobox*Listbox.foreground", p["fg"])
+
+        # Barra de menus: nativa no claro; desenhada no escuro (Windows)
+        if dark and CUSTOM_MENUBAR_IN_DARK:
+            self.custom_bar.configure(bg=p["menubar"])
+            for lbl in self.custom_labels:
+                lbl.configure(bg=p["menubar"], fg=p["fg"], activebackground=p["hover"])
+            self.root.config(menu="")
+            self.custom_bar.pack(side="top", fill="x", before=self.editor_frame)
+        else:
+            self.custom_bar.pack_forget()
+            self.root.config(menu=self.menubar)
+
+        for w in self.root.winfo_children():
+            if isinstance(w, tk.Toplevel):
+                self.style_dialog(w)
+        self.root.after_idle(lambda: set_dark_titlebar(self.root, self.dark))
+
+    def style_dialog(self, top):
+        """Aplica as cores do tema aos widgets tk (não-ttk) de um diálogo."""
+        p = self.palette
+
+        def walk(w):
+            cls = w.winfo_class()
+            try:
+                if cls in ("Toplevel", "Frame"):
+                    w.configure(bg=p["ui"])
+                elif cls == "Label":
+                    w.configure(bg=p["ui"], fg=p["fg"])
+                elif cls == "Listbox":
+                    w.configure(bg=p["field"], fg=p["fg"], highlightbackground=p["line"],
+                                highlightcolor=p["line"])
+            except tk.TclError:
+                pass
+            for c in w.winfo_children():
+                walk(c)
+        walk(top)
+        set_dark_titlebar(top, self.dark)
 
     def set_zoom(self, direction):
         if direction == 0:
